@@ -1,0 +1,21 @@
+FROM docker.io/library/httpd:2.4
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG SVC_UID
+ARG SVC_GID
+ARG SVC_USER
+
+RUN groupadd -g ${SVC_GID} ${SVC_USER} && \
+    useradd -u ${SVC_UID} -g ${SVC_GID} -M -s /sbin/nologin ${SVC_USER} && \
+    mkdir -p /etc/httpd/certs /srv/static && \
+    chown -R ${SVC_UID}:${SVC_GID} /srv/static
+
+COPY apache/httpd-ssl.conf /usr/local/apache2/conf/extra/httpd-ssl.conf
+COPY app/static/           /srv/static/
+
+# Enable the modules and include the SSL config.
+RUN echo 'Include conf/extra/httpd-ssl.conf' >> /usr/local/apache2/conf/httpd.conf
+
+EXPOSE 443
