@@ -5,15 +5,14 @@
 #   sudo ./init.sh
 #   podman compose up -d --build
 #
-# Only host-level concerns live here (packages, firewall, service account, dev
-# certs, SELinux). Everything else belongs in the container image.
+# Only host-level concerns live here (packages, service account, SSH hardening,
+# SELinux). Everything else belongs in the container image.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$REPO_DIR/.env"
 CONF_FILE="$REPO_DIR/service.conf"
-CERTS_DIR="$REPO_DIR/certs"
 
 if [ ! -f "$CONF_FILE" ]; then
     echo "FATAL: $CONF_FILE not found." >&2
@@ -51,26 +50,6 @@ podman --version
 systemctl enable --now podman-restart.service >/dev/null 2>&1 \
     && echo "podman-restart.service enabled" \
     || warn "could not enable podman-restart.service (containers won't restart at boot)"
-
-# ── Firewall ────────────────────────────────────────────────────────────────
-echo
-echo "== Firewall =="
-if systemctl is-active --quiet firewalld; then
-    for port_spec in 443/tcp; do
-        if firewall-cmd --permanent --query-port="$port_spec" >/dev/null 2>&1; then
-            echo "  ok   $port_spec already open"
-        else
-            firewall-cmd --permanent --add-port="$port_spec" >/dev/null
-            echo "  added $port_spec"
-        fi
-    done
-    firewall-cmd --reload >/dev/null
-    for port_spec in 443/tcp; do
-        firewall-cmd --query-port="$port_spec" >/dev/null 2>&1 || warn "$port_spec is not open at runtime"
-    done
-else
-    warn "firewalld is not running; ports not configured"
-fi
 
 # ── SSH hardening ───────────────────────────────────────────────────────────
 echo
@@ -135,28 +114,6 @@ if command -v getenforce >/dev/null && [ "$(getenforce)" != "Disabled" ]; then
     fi
 else
     warn "SELinux is disabled; cannot enable at runtime (requires reboot)"
-fi
-
-# ── Dev TLS certificates ───────────────────────────────────────────────────
-echo
-echo "== Dev TLS certificates =="
-# In production the cert and key would live on the shared NFS mount (see
-# SECRETS.md) and SVC_CERT_DIR would point at them. For development init.sh
-# generates a self-signed pair so `podman compose up` works out of the box.
-mkdir -p "$CERTS_DIR"
-if [ -f "$CERTS_DIR/hostcert.pem" ] && [ -f "$CERTS_DIR/hostkey.pem" ]; then
-    echo "  ok   dev certs already exist in $CERTS_DIR"
-else
-    FQDN="$(hostname -f 2>/dev/null || hostname)"
-    openssl req -x509 -newkey rsa:2048 -nodes \
-        -keyout "$CERTS_DIR/hostkey.pem" \
-        -out "$CERTS_DIR/hostcert.pem" \
-        -days 365 \
-        -subj "/C=US/ST=Washington/L=Seattle/O=UW DiRAC/OU=Dev/CN=${FQDN}" \
-        2>/dev/null
-    chmod 0600 "$CERTS_DIR/hostkey.pem"
-    chmod 0644 "$CERTS_DIR/hostcert.pem"
-    echo "  ok   generated self-signed dev cert for $FQDN"
 fi
 
 # ── Compose environment ────────────────────────────────────────────────────
