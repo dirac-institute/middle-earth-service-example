@@ -6,9 +6,9 @@
 # all in one container on port 8080. The VM's reverse proxy handles TLS
 # termination and routes traffic here.
 #
-# SVC_USER, SVC_UID, SVC_GID, and SVC_FQDN must be set in .env (written by
-# init.sh from service.conf). There are no defaults; a missing .env will
-# cause podman compose to fail.
+# SVC_USER, SVC_UID, SVC_GID, and SVC_FQDN must be set in .env in production
+# (written by init.sh from service.conf). There are no defaults; missing
+# values will cause podman compose to fail.
 
 services:
   app:
@@ -27,5 +27,6 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
+    user: "${SVC_UID}:${SVC_GID}"
     labels:
       idac.service: example-app

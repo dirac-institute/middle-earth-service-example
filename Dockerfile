@@ -1,17 +1,17 @@
 FROM docker.io/library/httpd:2.4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv && \
+        python3 python3-pip && \
     rm -rf /var/lib/apt/lists/*
 
 ARG SVC_UID
 ARG SVC_GID
 ARG SVC_USER
 
-RUN groupadd -g ${SVC_GID} ${SVC_USER} && \
-    useradd -u ${SVC_UID} -g ${SVC_GID} -M -s /sbin/nologin ${SVC_USER} && \
+RUN groupadd -g ${SVC_GID} ${SVC_USER} 2>/dev/null || true && \
+    useradd -u ${SVC_UID} -g ${SVC_GID} -M -s /sbin/nologin ${SVC_USER} 2>/dev/null || true && \
     mkdir -p /srv/app /srv/static && \
-    chown -R ${SVC_UID}:${SVC_GID} /srv
+    chown -R ${SVC_UID}:${SVC_GID} /srv /usr/local/apache2/logs
 
 COPY app/requirements.txt /srv/app/requirements.txt
 RUN pip install --no-cache-dir --break-system-packages -r /srv/app/requirements.txt

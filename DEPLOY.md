@@ -34,6 +34,8 @@ curl http://localhost:8080/
 | `app/server.py` | Flask application with one API endpoint (`GET /api/hello`). |
 | `app/static/index.html` | Static HTML page served directly by Apache. |
 | `apache/httpd.conf` | Apache virtual host: plain HTTP on 8080, static files from `/srv/static`, `/api/` proxied to Gunicorn on `127.0.0.1:8000`. |
+| `start.sh` | Container entrypoint: starts Gunicorn in the background, then runs Apache in the foreground. |
+| `dev-startup.sh` | Local development helper: exports environment variables and runs `docker compose` on macOS. |
 | `SECRETS.md` | How secrets are stored, the NFS ownership model, and permissions. |
 
 ## Architecture

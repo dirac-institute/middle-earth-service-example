@@ -19,7 +19,9 @@ fi
 # shellcheck source=service.conf
 source "$CONF_FILE"
 
-export SVC_USER SVC_UID SVC_GID
+export SVC_USER="$SVC_USER"
+export SVC_UID="$(id -u)"
+export SVC_GID="$(id -g)"
 export SVC_FQDN=localhost
 
 docker compose up -d --build
