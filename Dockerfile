@@ -20,7 +20,8 @@ COPY app/server.py /srv/app/server.py
 COPY app/static/   /srv/static/
 
 COPY apache/httpd.conf /usr/local/apache2/conf/extra/httpd-custom.conf
-RUN echo 'Include conf/extra/httpd-custom.conf' >> /usr/local/apache2/conf/httpd.conf
+RUN sed -i 's/^Listen 80$/#Listen 80/' /usr/local/apache2/conf/httpd.conf && \
+    echo 'Include conf/extra/httpd-custom.conf' >> /usr/local/apache2/conf/httpd.conf
 
 COPY start.sh /usr/local/bin/start.sh
 RUN chmod +x /usr/local/bin/start.sh
