@@ -100,22 +100,6 @@ else
     echo "  added user $SVC_USER ($SVC_UID)"
 fi
 
-# ── SELinux ─────────────────────────────────────────────────────────────────
-echo
-echo "== SELinux =="
-if command -v getenforce >/dev/null && [ "$(getenforce)" != "Disabled" ]; then
-    command -v semanage >/dev/null || dnf install -y policycoreutils-python-utils
-    if [ "$(getenforce)" = "Permissive" ]; then
-        setenforce 1
-        sed -i 's/^SELINUX=permissive/SELINUX=enforcing/' /etc/selinux/config
-        echo "  ok   SELinux set to enforcing"
-    else
-        echo "  ok   SELinux already enforcing"
-    fi
-else
-    warn "SELinux is disabled; cannot enable at runtime (requires reboot)"
-fi
-
 # ── Compose environment ────────────────────────────────────────────────────
 echo
 echo "== Compose environment =="
