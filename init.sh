@@ -5,47 +5,51 @@
 #   sudo ./init.sh
 #   podman compose up -d --build
 #
-# Only host-level concerns live here (podman packages, checking the service
-# account, .env). Everything else belongs in the container image. The service
-# account, SSH, and SELinux are provisioned by IT; this script does not change
-# them.
+# Only host-level concerns live here (checking the service account from IT's
+# /root/VM.set, podman packages, .env). Everything else belongs in the
+# container image. The service account, SSH, and SELinux are provisioned by
+# IT; this script does not change them.
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$REPO_DIR/.env"
-CONF_FILE="$REPO_DIR/service.conf"
-
-if [ ! -f "$CONF_FILE" ]; then
-    echo "FATAL: $CONF_FILE not found." >&2
-    echo "This file defines SVC_USER, SVC_UID, and SVC_GID for the service account." >&2
-    exit 1
-fi
-# shellcheck source=service.conf
-source "$CONF_FILE"
-for var in SVC_USER SVC_UID SVC_GID; do
-    if [ -z "${!var:-}" ]; then
-        echo "FATAL: $var is not set in $CONF_FILE" >&2
-        exit 1
-    fi
-done
+# Written by IT when the VM is provisioned and authoritative for the service
+# account. tcsh syntax: `set VMUSER=astro-myservice`.
+VM_SET=/root/VM.set
 
 WARNINGS=0
 warn() { echo "WARNING: $*" >&2; WARNINGS=$((WARNINGS + 1)); }
+die()  { echo "FATAL: $*" >&2; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || { echo "must run as root" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+
+# vmset NAME: the value of `set NAME=value` in VM.set, quotes removed. The
+# file is parsed, never executed; lines of any other form are ignored.
+vmset() {
+    sed -n -E "s/^[[:space:]]*set[[:space:]]+$1=(\"([^\"]*)\"|'([^']*)'|([^[:space:]\"']*))[[:space:]]*\$/\2\3\4/p" \
+        "$VM_SET" | tail -n 1
+}
+[ -r "$VM_SET" ] || die "$VM_SET not found. IT writes it when the VM is provisioned; it
+       defines the service account (VMUSER, VMUID, VMGID). Ask PACS via help-astro@uw.edu."
+SVC_USER="$(vmset VMUSER)"
+SVC_UID="$(vmset VMUID)"
+SVC_GID="$(vmset VMGID)"
+VM_NAME="$(vmset VM)"
+[[ "$SVC_USER" =~ ^[a-z_][a-z0-9_.-]*$ ]] || die "VMUSER in $VM_SET is missing or not a user name: '$SVC_USER'"
+[[ "$SVC_UID" =~ ^[0-9]+$ ]] || die "VMUID in $VM_SET is missing or not a number: '$SVC_UID'"
+[[ "$SVC_GID" =~ ^[0-9]+$ ]] || die "VMGID in $VM_SET is missing or not a number: '$SVC_GID'"
 
 # ── Service account ────────────────────────────────────────────────────────
 echo "== Service account =="
 # The container runs as this uid. On a production VM the secrets directory is
 # on a shared NFS mount exported with root_squash, meaning root cannot read
-# mode-0600 files -- only the service account can. IT provisions the account;
-# the uid/gid in service.conf must match it. See SECRETS.md for the production
-# story.
+# mode-0600 files -- only the service account can. IT provisions the account
+# and names it in VM.set; the two must agree. See SECRETS.md for the
+# production story.
 account_fail() {
     echo "FATAL: $*" >&2
-    echo "Fix SVC_USER/SVC_UID/SVC_GID in $CONF_FILE to match the service account" >&2
-    echo "on this VM, or request the account from PACS via help-astro@uw.edu." >&2
+    echo "$VM_SET and the accounts on this VM disagree; ask PACS via help-astro@uw.edu." >&2
     exit 1
 }
 have_user="$(getent passwd "$SVC_USER" || true)"
@@ -53,10 +57,10 @@ have_user="$(getent passwd "$SVC_USER" || true)"
 have_uid="$(echo "$have_user" | cut -d: -f3)"
 have_gid="$(echo "$have_user" | cut -d: -f4)"
 [ "$have_uid" = "$SVC_UID" ] \
-    || account_fail "user $SVC_USER has uid $have_uid, service.conf says $SVC_UID"
+    || account_fail "user $SVC_USER has uid $have_uid, VM.set says $SVC_UID"
 [ "$have_gid" = "$SVC_GID" ] \
-    || account_fail "user $SVC_USER has primary gid $have_gid, service.conf says $SVC_GID"
-echo "  ok   user $SVC_USER ($SVC_UID:$SVC_GID) exists"
+    || account_fail "user $SVC_USER has primary gid $have_gid, VM.set says $SVC_GID"
+echo "  ok   user $SVC_USER ($SVC_UID:$SVC_GID) from $VM_SET exists"
 
 # ── Packages ────────────────────────────────────────────────────────────────
 echo
@@ -85,10 +89,16 @@ case "$FQDN" in
     *.*) ;;
     *)   warn "hostname '$FQDN' is not fully qualified; check DNS and /etc/hosts" ;;
 esac
-# Write service identity and the host FQDN into .env so podman compose can
-# read them. .env is gitignored and per-host; service.conf is the committed
-# source of truth for the identity values.
+# VM.set's VM is IT's short name for this VM. Nothing here depends on it, but
+# a mismatch means VM.set may have been copied from another VM.
+SHORT="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+[ -z "$VM_NAME" ] || [ "$VM_NAME" = "$SHORT" ] \
+    || warn "VM.set says VM=$VM_NAME but the hostname is $SHORT; is $VM_SET from this VM?"
+# .env is gitignored and derived: rewritten on every run from VM.set and the
+# hostname, so podman compose can read them. Re-run init.sh rather than
+# editing it.
 cat > "$ENV_FILE" <<EOF
+# Written by init.sh on every run; don't edit.
 SVC_USER=$SVC_USER
 SVC_UID=$SVC_UID
 SVC_GID=$SVC_GID

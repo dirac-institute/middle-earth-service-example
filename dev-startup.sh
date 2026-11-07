@@ -3,23 +3,16 @@
 #
 #   ./dev-startup.sh
 #
-# Exports service.conf values as environment variables (the uid/gid only
-# matter on the production VM where NFS root_squash is in play) and runs
-# docker compose.
+# There is no /root/VM.set on a laptop, so this runs the containers as you
+# (your own uid/gid) under a placeholder account name. The real service
+# account only matters on the production VM, where NFS root_squash is in play;
+# there, init.sh reads it from VM.set.
 
 set -euo pipefail
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONF_FILE="$REPO_DIR/service.conf"
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-if [ ! -f "$CONF_FILE" ]; then
-    echo "FATAL: $CONF_FILE not found." >&2
-    exit 1
-fi
-# shellcheck source=service.conf
-source "$CONF_FILE"
-
-export SVC_USER="$SVC_USER"
+export SVC_USER=dev-svc
 export SVC_UID="$(id -u)"
 export SVC_GID="$(id -g)"
 export SVC_FQDN=localhost

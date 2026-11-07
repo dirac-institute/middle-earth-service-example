@@ -8,7 +8,7 @@
 # reports the VM's CPU, memory and disks on port 9110 for the gadget monitor.
 #
 # SVC_USER, SVC_UID, SVC_GID, and SVC_FQDN must be set in .env in production
-# (written by init.sh from service.conf). There are no defaults; missing
+# (written by init.sh from IT's /root/VM.set). There are no defaults; missing
 # values will cause podman compose to fail.
 
 services:

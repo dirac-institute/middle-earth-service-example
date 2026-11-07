@@ -32,8 +32,8 @@ Then register the VM with the gadget monitor; see "Monitoring" below.
 
 | File | Role |
 |---|---|
-| `service.conf` | Single source of truth for the service account name, uid, and gid. Committed to the repo. Everything else reads from here. |
-| `init.sh` | Host-level only: checks the service account matches `service.conf`, installs podman + podman-compose, enables `podman-restart.service`, writes `.env`. Idempotent; safe to re-run. |
+| `/root/VM.set` (not in the repo) | Written by IT when the VM is provisioned. The source of truth for the service account name, uid, and gid. |
+| `init.sh` | Host-level only: reads the service account from `/root/VM.set` and checks it exists on the VM, installs podman + podman-compose, enables `podman-restart.service`, writes `.env`. Idempotent; safe to re-run. |
 | `Dockerfile` | Apache httpd 2.4 + Python 3 + Flask/Gunicorn in one image. Apache serves static files and reverse-proxies `/api/` to Gunicorn. |
 | `start.sh` | Container entrypoint: starts Gunicorn in the background, then runs Apache in the foreground. |
 | `compose.yaml` | Two services: `app` (Apache + Gunicorn in one container on port 8080) and `monitoring` (the VM's CPU, memory and disks on port 9110). |
@@ -42,7 +42,7 @@ Then register the VM with the gadget monitor; see "Monitoring" below.
 | `apache/httpd.conf` | Apache virtual host: plain HTTP on 8080, static files from `/srv/static`, `/api/` proxied to Gunicorn on `127.0.0.1:8000`. |
 | `start.sh` | Container entrypoint: starts Gunicorn in the background, then runs Apache in the foreground. |
 | `monitoring/` | Service VM monitor, copied unchanged from [middle-earth-gadget-monitor](https://github.com/dirac-institute/middle-earth-gadget-monitor). Its image and compose settings (`monitoring/compose.yaml`, pulled into `compose.yaml` with `extends`). See `monitoring/README.md`. |
-| `dev-startup.sh` | Local development helper: exports environment variables and runs `docker compose` on macOS. |
+| `dev-startup.sh` | Local development helper for macOS: runs `docker compose` as your own uid/gid, since a laptop has no `VM.set`. |
 | `SECRETS.md` | How secrets are stored, the NFS ownership model, and permissions. |
 
 ## Architecture
@@ -82,8 +82,9 @@ are mounted read-only into the container at runtime. See `SECRETS.md` for the
 full story.
 
 **Service account with fixed uid/gid.** The service account name, uid, and gid
-are defined once in `service.conf` and flow into every other file — init.sh,
-the Dockerfile, and compose.yaml all read from it with no fallback defaults.
+come from IT's `/root/VM.set` on the VM, and flow through `.env` into the
+Dockerfile and compose.yaml with no fallback defaults. Nothing about the
+account is committed to the repo, so the same checkout deploys to any VM.
 The uid/gid must match the owner of secrets on the production NFS share, which
 is exported with `root_squash` — only that uid can read mode-0600 secrets. See
 `SECRETS.md` for details on why this matters.
@@ -98,39 +99,49 @@ small monitor container, so the gadget monitor can graph its CPU, memory,
 disks and load. It is copied into the repo rather than written per service,
 and every service gets it with no changes of its own.
 
-## Service identity: `service.conf`
+## Service identity: `/root/VM.set`
 
-`service.conf` is the single source of truth for the service account:
+IT leaves `/root/VM.set` on every VM when it provisions it. It is in tcsh
+syntax and names the VM and its service account:
 
 ```
-SVC_USER=astro-svc
-SVC_UID=1725455
-SVC_GID=2121725455
+set VM=myservice
+set VMUSER=astro-myservice
+set VMUID=NNNNNNN
+set VMGID=NNNNNNNNNN
+set VMGECOS="My Service Management User"
 ```
 
-It is committed to the repo. `init.sh` reads it, exits if the account does
-not exist on the VM with that uid and primary gid, and writes the values into
-`.env` alongside the per-host FQDN. The Dockerfile and compose.yaml consume
-these values via build args and environment variables with no hardcoded
-defaults — if `service.conf` is missing or incomplete, `init.sh` exits
-immediately, and running `podman compose` without a populated `.env` will
-fail on the missing variables.
+`init.sh` reads `VMUSER`, `VMUID` and `VMGID` from it. It parses the file and
+never runs it, and ignores lines of any other form. It exits if the file is
+missing, if any of the three is missing or malformed, or if the account does
+not exist on the VM with exactly that uid and primary gid. If `VM` doesn't
+match the VM's short hostname, it warns, because the file may have been
+copied from another VM. `VMGECOS` is not used.
+
+There is no copy of these values in the repo. If `VM.set` is missing or wrong,
+ask PACS via help-astro@uw.edu rather than writing your own.
 
 ## Per-host configuration: `.env`
 
-The only per-machine value is the host's own FQDN, which compose.yaml uses
-as the Apache `ServerName` and container hostname. `init.sh` writes it (along
-with the `service.conf` values) to `.env`, which podman compose reads
-automatically:
+`init.sh` writes the account to `.env` as `SVC_USER`, `SVC_UID` and
+`SVC_GID`, along with the host's own FQDN (`SVC_FQDN`), which compose.yaml
+uses as the Apache `ServerName` and container hostname. Podman compose reads
+`.env` automatically:
 
 ```
-SVC_USER=astro-svc
-SVC_UID=1725455
-SVC_GID=2121725455
-SVC_FQDN=myhost.astro.washington.edu
+# Written by init.sh on every run; don't edit.
+SVC_USER=astro-myservice
+SVC_UID=NNNNNNN
+SVC_GID=NNNNNNNNNN
+SVC_FQDN=myservice.astro.washington.edu
 ```
 
-`.env` is gitignored and must never be copied between hosts.
+The Dockerfile and compose.yaml consume these values via build args and
+environment variables with no hardcoded defaults, so running `podman compose`
+without a populated `.env` fails on the missing variables. `.env` is
+gitignored and derived: `init.sh` rewrites it on every run. Re-run `init.sh`
+rather than editing it, and never copy it between hosts.
 
 ## VM infrastructure context
 
@@ -146,14 +157,15 @@ Key things to know:
   open ports itself.
 - **Service accounts** exist because the NFS share uses `root_squash`. The
   container process must run as the uid that owns the secrets on the share.
-  IT creates this account on the VM; `init.sh` checks that it matches
-  `service.conf` and exits if it does not.
+  IT creates this account on the VM and names it in `/root/VM.set`;
+  `init.sh` checks the two agree and exits if they do not.
 
 ## Rollout to another VM
 
 The procedure above is the whole deployment. On a new VM, confirm:
 
-- The service account in `service.conf` exists on the VM (IT provisions it).
+- `/root/VM.set` exists and names a service account that exists on the VM
+  (IT provisions both).
 - The VM has network access to pull container base images.
 - For production: if the service has secrets, `/service/shire` is mounted and
   the secrets directory is populated (see `SECRETS.md`).
