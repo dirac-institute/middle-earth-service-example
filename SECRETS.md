@@ -22,9 +22,12 @@ volumes:
 
 `/service/shire` is exported with `root_squash`, so **root on the VM cannot
 write to it** — root is mapped to `nobody`. The tree is owned by the service
-account whose name, uid, and gid are defined in `service.conf`.
+account named in IT's `/root/VM.set` (`VMUSER`, `VMUID`, `VMGID`), which
+`init.sh` also writes to the repo's `.env` as `SVC_USER`, `SVC_UID`, `SVC_GID`.
 
-To place or update secrets, become that user (use the name from `service.conf`):
+To place or update secrets, become that user (`VMUSER`). The commands below
+use the `SVC_*` names; in bash, `source .env` in the repo directory first to
+set them.
 
 ```bash
 sudo -u $SVC_USER install -m 0600 /path/to/secret \
@@ -32,8 +35,8 @@ sudo -u $SVC_USER install -m 0600 /path/to/secret \
 ```
 
 IT creates this account on the VM, and `init.sh` checks that it matches
-`service.conf`. If the account is not available by name, use the numeric ids
-from `service.conf` instead:
+`VM.set`. If the account is not available by name, use the numeric ids
+(`VMUID`, `VMGID`) instead:
 
 ```bash
 setpriv --reuid=$SVC_UID --regid=$SVC_GID --clear-groups \
@@ -42,8 +45,8 @@ setpriv --reuid=$SVC_UID --regid=$SVC_GID --clear-groups \
 
 The container must *run* as that uid, or it cannot read mode-0600 files on the
 share. The image creates a user with that uid/gid and the compose file sets
-`user:` accordingly. All three values come from `service.conf` with no
-hardcoded defaults.
+`user:` accordingly. All three values come from `VM.set` (via `.env`) with
+no hardcoded defaults.
 
 ## Permissions
 

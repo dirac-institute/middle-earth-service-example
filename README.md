@@ -17,13 +17,14 @@ service into a standalone repo that deploys the same way.
 - **A Rocky 10 VM** to deploy to, with `sudo` access or root login directly.
   The VM provides a reverse proxy that handles TLS termination and routes
   traffic to your container on port 8080.
-- **A service account uid/gid**, created on the VM by IT. Your containers
-  will run as this identity, and `init.sh` exits if the account on the VM
-  does not match `service.conf`.
+- **A service account**, created on the VM by IT, and **`/root/VM.set`**
+  naming it (IT writes this when it provisions the VM). Your containers
+  will run as this identity. `init.sh` reads it from `VM.set` and exits if
+  the file is missing or disagrees with the account on the VM.
   On production VMs the service's secrets live on an NFS share exported with
   `root_squash`, so only this uid can read them. If you already have files on
-  `/service/shire` for your service, use the uid/gid that owns them. If you
-  are starting fresh, coordinate with infrastructure to get one assigned.
+  `/service/shire` for your service, tell IT, so the account they create
+  (and name in `VM.set`) is the uid/gid that owns them.
 - **Network access** from the VM — it needs to pull container base images
   during the build.
 
@@ -50,7 +51,7 @@ The prompts below are written for that kind of tool.
 The AI reads this example repo to learn the deployment pattern. Then it reads
 your legacy service (via SSH, config files you provide, or documentation you
 point it at) to understand what your service actually does. It produces a new
-standalone repo shaped like this one — its own `service.conf`, `init.sh`,
+standalone repo shaped like this one — its own `init.sh`,
 Dockerfile, compose file, and documentation — but containing your service
 instead of the hello-world example.
 
@@ -92,19 +93,24 @@ You do not need all of this in a tidy document. Pointing the AI at the
 machine and saying "look at the systemd units and the config directory" is
 fine.
 
-### 3. Fill in `service.conf`
+### 3. Check `/root/VM.set` on your VM
 
-Before the AI starts building, decide on the service account identity and
-put it in `service.conf`:
+The service account identity comes from IT, not from your repo. On the VM,
+`/root/VM.set` names it:
 
 ```
-SVC_USER=my-service-name
-SVC_UID=<your assigned uid>
-SVC_GID=<your assigned gid>
+set VM=myservice
+set VMUSER=astro-myservice
+set VMUID=NNNNNNN
+set VMGID=NNNNNNNNNN
 ```
 
-This is the one thing every other file keys off of. There are no fallback
-defaults — if this is wrong or missing, everything fails, which is the point.
+There is nothing to fill in. `init.sh` reads this file and everything else keys
+off of what it finds. There are no fallback defaults: if the file is missing,
+or the account it names doesn't exist on the VM, `init.sh` stops, which is the
+point. If you already have files on `/service/shire` for your service, check
+that `VMUID` and `VMGID` own them. If anything is missing or disagrees, ask
+PACS via help-astro@uw.edu.
 
 ### 4. Prompt the AI
 
@@ -114,7 +120,6 @@ what you want. The key ingredients are:
 1. **Point it at this repo** as the pattern to follow.
 2. **Point it at the legacy service** so it can understand what to build.
 3. **Tell it what the new repo should be called.**
-4. **Tell it the service account identity.**
 
 Here is an example prompt:
 
@@ -132,8 +137,7 @@ Here is an example prompt:
 > [path]. It listens on port [N] for [protocol].
 >
 > **Build a new standalone repo** called `my-service` in [target directory].
-> It should have its own `service.conf` (user: `my-svc`, uid: `NNNNNN`,
-> gid: `NNNNNNNNNN`), `init.sh`, Dockerfile, `compose.yaml`, `DEPLOY.md`,
+> It should have its own `init.sh`, Dockerfile, `compose.yaml`, `DEPLOY.md`,
 > and `SECRETS.md`, following the same patterns as the example but
 > containing my service.
 >
@@ -141,7 +145,8 @@ Here is an example prompt:
 > - `init.sh` handles only host-level concerns; everything else is in
 >   containers
 > - Secrets are bind-mounted read-only, never baked into images
-> - `service.conf` is the single source of truth for the service identity
+> - The service account comes from IT's `/root/VM.set` on the VM, read by
+>   `init.sh`; nothing about it is committed to the repo
 > - The container listens on port 8080; the VM handles TLS and routing
 > - Apache for static files and reverse-proxying to the app process
 > - The `monitoring/` folder, copied unchanged, and its `monitoring:` entry
