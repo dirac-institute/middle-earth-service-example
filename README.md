@@ -4,7 +4,9 @@ A template for deploying containerized services on UW DiRAC VM infrastructure.
 
 This repo is a working "hello world" — Apache serving static files and
 reverse-proxying a Python API, all in one container — that demonstrates the
-deployment pattern all DiRAC VM services should follow. It is meant to be read
+deployment pattern all DiRAC VM services should follow. Next to it runs the
+**service VM monitor** (`monitoring/`), a small container that reports the VM's
+CPU, memory and disks to the DiRAC gadget monitor. Every service carries it. It is meant to be read
 by you *and* by an AI coding assistant. Together, you use it to turn a legacy
 service into a standalone repo that deploys the same way.
 
@@ -142,6 +144,9 @@ Here is an example prompt:
 > - `service.conf` is the single source of truth for the service identity
 > - The container listens on port 8080; the VM handles TLS and routing
 > - Apache for static files and reverse-proxying to the app process
+> - The `monitoring/` folder, copied unchanged, and its `monitoring:` entry
+>   in `compose.yaml` (change only `container_name` and `labels`), so the
+>   gadget monitor can see the VM's CPU, memory and disks
 >
 > **What to figure out from the legacy service:**
 > - What packages and dependencies it needs
@@ -201,17 +206,26 @@ the AI do them over SSH to the VM:
    using the VM's FQDN. This validates that the VM's reverse proxy is routing
    traffic correctly.
 
-5. **Secrets are not baked in.** `podman inspect <container>` — check the
+5. **The monitoring endpoint answers.** From the VM and from another
+   machine:
+
+   ```bash
+   curl -s http://<vm fqdn>:9110/metrics | grep source_success
+   ```
+
+   Every `source` should report `1`.
+
+6. **Secrets are not baked in.** `podman inspect <container>` — check the
    mounts section shows your secrets directory bind-mounted read-only.
    `podman exec <container> cat /path/to/secret` should work (the mount is
    there), but `podman history <image>` should show no COPY or ADD of
    secret files.
 
-6. **Survives a restart.** `sudo reboot` the VM. After it comes back, check
+7. **Survives a restart.** `sudo reboot` the VM. After it comes back, check
    that `podman ps` shows the containers running again (this confirms
    `podman-restart.service` is working).
 
-7. **Compare against the legacy service.** If possible, run the same client
+8. **Compare against the legacy service.** If possible, run the same client
    operations against both the legacy host and the new VM. The responses
    should be equivalent. Differences here reveal config or dependencies
    that were missed during containerization.
@@ -220,10 +234,22 @@ If any check fails, fix it in the repo (not by hand on the VM), rebuild, and
 re-test. The whole point of this pattern is that the repo *is* the
 deployment — manual fixes on the host are bugs in the repo.
 
+### 7. Register the VM with the gadget monitor
+
+The gadget monitor only graphs VMs listed in its config. Once the service is
+running on its **production** VM and check 5 passes from another machine,
+open a pull request against
+[middle-earth-gadget-monitor](https://github.com/dirac-institute/middle-earth-gadget-monitor)
+adding the VM to `config/service_vms.toml`. `DEPLOY.md`, "Registering the VM
+with the gadget monitor", says what goes in the entry and the PR. Skip this
+for dev or test VMs.
+
 ## Further reading
 
 - **`DEPLOY.md`** — deploy instructions, architecture, design choices, VM
   infrastructure context, and what stays the same vs. what changes per
   service.
+- **`monitoring/README.md`** — the service VM monitor: what it reports and
+  why its compose settings are what they are.
 - **`SECRETS.md`** — how secrets are handled, the `root_squash` ownership
   story, and permissions.

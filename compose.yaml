@@ -4,7 +4,8 @@
 #
 # Apache serves static files and proxies API requests to a Python backend,
 # all in one container on port 8080. The VM's reverse proxy handles TLS
-# termination and routes traffic here.
+# termination and routes traffic here. A second container, `monitoring`,
+# reports the VM's CPU, memory and disks on port 9110 for the gadget monitor.
 #
 # SVC_USER, SVC_UID, SVC_GID, and SVC_FQDN must be set in .env in production
 # (written by init.sh from service.conf). There are no defaults; missing
@@ -30,3 +31,15 @@ services:
     user: "${SVC_UID}:${SVC_GID}"
     labels:
       idac.service: example-app
+
+  # CPU, memory and disks of this VM, for the gadget monitor (monitoring/README.md).
+  # Copied unchanged from middle-earth-gadget-monitor; its settings live in
+  # monitoring/compose.yaml. Serves http://<vm fqdn>:9110/metrics.
+  monitoring:
+    extends:
+      file: monitoring/compose.yaml
+      service: monitoring
+    build: monitoring
+    container_name: example-service-vm
+    labels:
+      idac.service: example-service-vm
